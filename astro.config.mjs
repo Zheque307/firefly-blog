@@ -1,4 +1,5 @@
 import { setMaxListeners } from "node:events";
+// DSH-CI-TRIGGER: 触发一次 CI 部署验证（可安全删除）
 import cloudflare from "@astrojs/cloudflare";
 import { unified } from "@astrojs/markdown-remark";
 import mdx from "@astrojs/mdx";
