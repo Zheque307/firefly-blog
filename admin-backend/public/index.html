@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内容后台 · 折鹊的小屋</title>
+<style>
+  :root{
+    --bg:#0f1220; --bg2:#161a2e; --panel:rgba(255,255,255,.06); --panel2:rgba(255,255,255,.09);
+    --line:rgba(255,255,255,.12); --line2:rgba(255,255,255,.2);
+    --fg:#eef1ff; --fg2:#a8b0d3; --fg3:#6f78a0;
+    --accent:#ff7ab6; --accent2:#7ab8ff; --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    color:var(--fg); background:
+      radial-gradient(1200px 700px at 12% -10%, rgba(255,122,182,.20), transparent 60%),
+      radial-gradient(900px 600px at 100% 0%, rgba(122,184,255,.16), transparent 55%),
+      linear-gradient(160deg,var(--bg),var(--bg2) 60%,#0b0e1a);
+    background-attachment:fixed;
+  }
+  button,input,textarea,select{font:inherit;color:inherit}
+  button{cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--fg);
+    padding:7px 14px;border-radius:10px;transition:.15s;backdrop-filter:blur(8px)}
+  button:hover{background:var(--panel2);border-color:var(--line2)}
+  button.primary{background:linear-gradient(135deg,var(--accent),#ff9ecb);border-color:transparent;color:#25121c;font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  button.ghost{background:transparent}
+  button.danger:hover{background:rgba(248,113,113,.16);border-color:rgba(248,113,113,.5)}
+  input,textarea,select{background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:10px;padding:8px 11px;outline:none;width:100%}
+  input:focus,textarea:focus,select:focus{border-color:var(--accent)}
+  textarea{resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.7}
+
+  /* 登录 */
+  #login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    backdrop-filter:blur(18px) saturate(1.2);box-shadow:0 20px 60px rgba(0,0,0,.45)}
+  #login .card{width:min(400px,100%);padding:34px}
+  #login h1{margin:0 0 6px;font-size:20px}
+  #login p{margin:0 0 22px;color:var(--fg2);font-size:13px}
+  .msg{font-size:13px;min-height:20px;color:var(--err);margin-top:10px}
+
+  /* 主界面 */
+  #app{display:none;height:100%;grid-template-rows:auto 1fr auto;gap:0}
+  header{display:flex;align-items:center;gap:14px;padding:12px 18px;
+    background:var(--panel);border-bottom:1px solid var(--line);backdrop-filter:blur(16px)}
+  header .brand{font-weight:700;letter-spacing:.3px}
+  header .brand small{color:var(--fg3);font-weight:400;margin-left:8px}
+  header .sp{flex:1}
+  .tag{font-size:12px;color:var(--fg2);border:1px solid var(--line);border-radius:999px;padding:2px 10px}
+  main{display:grid;grid-template-columns:320px 1fr;min-height:0}
+  #list{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:rgba(0,0,0,.14)}
+  #list .bar{padding:12px;display:flex;gap:8px;border-bottom:1px solid var(--line)}
+  #items{overflow:auto;flex:1;padding:8px}
+  .item{padding:10px 12px;border-radius:10px;border:1px solid transparent;cursor:pointer;margin-bottom:4px}
+  .item:hover{background:var(--panel)}
+  .item.active{background:var(--panel2);border-color:var(--line2)}
+  .item .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .m{font-size:12px;color:var(--fg3);display:flex;gap:8px;margin-top:2px}
+  .pill{font-size:11px;border-radius:6px;padding:1px 7px;border:1px solid var(--line)}
+  .pill.draft{color:var(--warn);border-color:rgba(251,191,36,.45)}
+  .pill.pin{color:var(--accent2);border-color:rgba(122,184,255,.45)}
+  .pill.dyn{color:var(--accent);border-color:rgba(255,122,182,.45)}
+
+  #editor{display:flex;flex-direction:column;min-height:0}
+  #meta{padding:14px 18px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  #meta label{display:block;font-size:12px;color:var(--fg2);margin-bottom:4px}
+  .full{grid-column:1/-1}
+  #panes{display:grid;grid-template-columns:1fr 1fr;min-height:0;flex:1}
+  #panes textarea{border:0;border-radius:0;height:100%;background:rgba(0,0,0,.2)}
+  #preview{overflow:auto;padding:16px 20px;border-left:1px solid var(--line);min-height:0}
+  #preview h1,#preview h2,#preview h3{border-bottom:1px solid var(--line);padding-bottom:6px}
+  #preview img{max-width:100%;border-radius:8px}
+  #preview code{background:rgba(255,255,255,.1);padding:1px 5px;border-radius:5px;font-family:ui-monospace,Menlo,monospace}
+  #preview pre{background:rgba(0,0,0,.35);padding:12px;border-radius:10px;overflow:auto}
+  #preview pre code{background:none;padding:0}
+  #preview blockquote{border-left:3px solid var(--accent);margin:0;padding-left:14px;color:var(--fg2)}
+  #preview table{border-collapse:collapse}
+  #preview th,#preview td{border:1px solid var(--line);padding:6px 10px}
+
+  footer{border-top:1px solid var(--line);background:var(--panel);backdrop-filter:blur(16px);
+    padding:10px 18px;display:flex;align-items:center;gap:12px;font-size:13px}
+  footer .sp{flex:1}
+  #status{color:var(--fg2)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--fg3);margin-right:7px}
+  .dot.ok{background:var(--ok)} .dot.busy{background:var(--warn);animation:p 1s infinite} .dot.err{background:var(--err)}
+  @keyframes p{50%{opacity:.3}}
+
+  /* 弹窗 */
+  .modal{position:fixed;inset:0;background:rgba(6,8,16,.66);display:none;align-items:center;justify-content:center;padding:20px;z-index:50;backdrop-filter:blur(4px)}
+  .modal.on{display:flex}
+  .modal .card{width:min(720px,100%);max-height:86vh;overflow:auto;padding:22px}
+  .modal h2{margin:0 0 14px;font-size:17px}
+  .row{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+  .row input[type=text],.row input[type=number]{flex:1}
+  .track{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .track .full{grid-column:1/-1}
+  #log{white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;background:rgba(0,0,0,.35);
+    padding:12px;border-radius:10px;max-height:46vh;overflow:auto;color:var(--fg2)}
+  .hint{font-size:12px;color:var(--fg3);margin-top:6px}
+  @media(max-width:900px){
+    main{grid-template-columns:1fr}
+    #list{max-height:38vh;border-right:0;border-bottom:1px solid var(--line)}
+    #panes{grid-template-columns:1fr}
+    #preview{border-left:0;border-top:1px solid var(--line)}
+  }
+</style>
+</head>
+<body>
+
+<!-- 登录 -->
+<div id="login">
+  <div class="card">
+    <h1>折鹊的小屋 · 内容后台</h1>
+    <p>输入管理密码以继续</p>
+    <input type="password" id="pw" placeholder="管理密码" autocomplete="current-password">
+    <div class="msg" id="loginMsg"></div>
+    <button class="primary" style="width:100%;margin-top:6px" onclick="doLogin()">登录</button>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="app">
+  <header>
+    <div class="brand">折鹊的小屋 <small>内容后台</small></div>
+    <span class="tag" id="siteTag">加载中…</span>
+    <div class="sp"></div>
+    <button class="ghost" onclick="openMusic()">音乐配置</button>
+    <button class="ghost" onclick="openData('friends','友链配置')">友链</button>
+    <button class="ghost" onclick="openLog()">构建日志</button>
+    <button onclick="logout()">退出</button>
+  </header>
+
+  <main>
+    <section id="list">
+      <div class="bar">
+        <button class="primary" onclick="newPost()">+ 新文章</button>
+        <button onclick="newDynamic()">+ 动态</button>
+        <button class="ghost" onclick="loadPosts()">刷新</button>
+      </div>
+      <div id="items"></div>
+    </section>
+
+    <section id="editor">
+      <div id="meta">
+        <div class="full"><label>标题</label><input id="f_title" placeholder="文章标题"></div>
+        <div><label>发布日期</label><input id="f_published" placeholder="2026-09-25"></div>
+        <div><label>分类</label><input id="f_category" placeholder="随笔"></div>
+        <div><label>标签（逗号分隔）</label><input id="f_tags" placeholder="生活, 折腾"></div>
+        <div><label>Slug（文件名，英文/中文均可）</label><input id="f_slug" placeholder="my-first-post"></div>
+        <div class="full"><label>摘要</label><input id="f_description" placeholder="列表页显示的一段话"></div>
+        <div><label>置顶</label><select id="f_pinned"><option value="false">否</option><option value="true">是</option></select></div>
+        <div><label>草稿</label><select id="f_draft"><option value="false">发布</option><option value="true">草稿</option></select></div>
+        <div><label>评论</label><select id="f_comment"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        <div><label>文章密码（留空则公开）</label><input id="f_password" placeholder="可选"></div>
+      </div>
+      <div id="panes">
+        <textarea id="content" placeholder="在这里写 Markdown…&#10;&#10;支持标题、列表、代码块、表格、图片、数学公式等。"></textarea>
+        <div id="preview"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="status"><span class="dot"></span>就绪</span>
+    <div class="sp"></div>
+    <span id="saveHint" style="color:var(--fg3)"></span>
+    <button onclick="savePost()">保存</button>
+    <button class="primary" onclick="publish()">保存并发布到网站</button>
+  </footer>
+</div>
+
+<!-- 通用弹窗 -->
+<div class="modal" id="modal">
+  <div class="card">
+    <h2 id="mTitle">标题</h2>
+    <div id="mBody"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+      <button class="ghost" onclick="closeModal()">关闭</button>
+      <button class="primary" id="mSave" onclick="modalSave()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ───────── 基础 ───────── */
+const $ = (id) => document.getElementById(id);
+let state = { posts: [], current: null, dirty: false, kind: "post", mdx: false };
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { credentials: "same-origin", headers: { "Content-Type": "application/json" }, ...opts });
+  if (r.status === 401) { showLogin(); throw new Error("未登录"); }
+  const t = await r.text();
+  let j = null;
+  try { j = t ? JSON.parse(t) : null; } catch { j = { raw: t }; }
+  if (!r.ok) throw new Error((j && j.error) || ("HTTP " + r.status));
+  return j;
+}
+
+/* ───────── 登录 ───────── */
+function showLogin(){ $("login").style.display="flex"; $("app").style.display="none"; }
+function showApp(){ $("login").style.display="none"; $("app").style.display="grid"; }
+
+async function doLogin(){
+  const pw = $("pw").value;
+  $("loginMsg").textContent = "";
+  try {
+    const r = await fetch("/api/login", { method:"POST", credentials:"same-origin",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({ password: pw }) });
+    if (!r.ok) { $("loginMsg").textContent = "密码错误"; return; }
+    $("pw").value = "";
+    showApp(); boot();
+  } catch (e) { $("loginMsg").textContent = "登录失败：" + e.message; }
+}
+$("pw").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+
+async function logout(){ await fetch("/api/logout", {method:"POST",credentials:"same-origin"}); location.reload(); }
+
+/* ───────── 文章列表 ───────── */
+function fmtTime(ms){ const d=new Date(ms); return d.toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+
+async function loadPosts(){
+  const { posts } = await api("/api/posts");
+  state.posts = posts;
+  $("items").innerHTML = posts.map(p => `
+    <div class="item ${state.current && state.current.slug===p.slug && state.current.kind===p.kind ? "active":""}"
+         onclick="openPost('${p.kind}','${p.slug.replace(/'/g,"\\'")}')">
+      <div class="t">${esc(p.title)}</div>
+      <div class="m">
+        <span>${esc(String(p.published).slice(0,10))}</span>
+        ${p.draft ? '<span class="pill draft">草稿</span>' : ''}
+        ${p.pinned ? '<span class="pill pin">置顶</span>' : ''}
+        ${p.kind==="dynamic" ? '<span class="pill dyn">动态</span>' : ''}
+        <span style="margin-left:auto">${fmtTime(p.mtime)}</span>
+      </div>
+    </div>`).join("") || '<div style="padding:20px;color:var(--fg3);text-align:center">还没有文章<br>点左上角「新文章」开始</div>';
+}
+function esc(s){ return String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ───────── 打开 / 编辑 ───────── */
+async function openPost(kind, slug){
+  if (state.dirty && !confirm("当前修改尚未保存，确定放弃吗？")) return;
+  const d = await api(`/api/post?kind=${kind}&slug=${encodeURIComponent(slug)}`);
+  state.current = { kind, slug }; state.kind = kind; state.mdx = /\.mdx$/i.test(d.file||"");
+  const v = d.data || {};
+  $("f_title").value = v.title || "";
+  $("f_published").value = String(v.published || "").slice(0,10);
+  $("f_category").value = v.category || "";
+  $("f_tags").value = Array.isArray(v.tags) ? v.tags.join(", ") : (v.tags || "");
+  $("f_slug").value = slug;
+  $("f_description").value = v.description || "";
+  $("f_pinned").value = v.pinned ? "true" : "false";
+  $("f_draft").value = v.draft ? "true" : "false";
+  $("f_comment").value = v.comment === false ? "false" : "true";
+  $("f_password").value = v.password || "";
+  $("content").value = d.content || "";
+  state.dirty = false; $("saveHint").textContent = "";
+  renderPreview(); loadPosts();
+}
+
+function newPost(){
+  if (state.dirty && !confirm("当前修改尚未保存，确定放弃吗？")) return;
+  const today = new Date().toISOString().slice(0,10);
+  state.current = { kind:"post", slug:"" }; state.kind="post"; state.mdx=false;
+  ["f_title","f_category","f_tags","f_description","f_password"].forEach(i=>$(i).value="");
+  $("f_published").value = today;
+  $("f_slug").value = "post-" + today.replace(/-/g,"");
+  $("f_pinned").value="false"; $("f_draft").value="false"; $("f_comment").value="true";
+  $("content").value = ""; $("content").focus(); renderPreview();
+}
+
+function newDynamic(){
+  if (state.dirty && !confirm("当前修改尚未保存，确定放弃吗？")) return;
+  const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+  state.current = { kind:"dynamic", slug: ts }; state.kind="dynamic";
+  ["f_title","f_category","f_tags","f_description","f_password"].forEach(i=>$(i).value="");
+  $("f_published").value = new Date().toISOString();
+  $("f_slug").value = ts;
+  $("content").value = ""; $("content").focus(); renderPreview();
+  $("status").innerHTML = '<span class="dot ok"></span>新动态：填写内容后保存';
+}
+
+/* ───────── 保存 ───────── */
+function collect(){
+  const slug = $("f_slug").value.trim();
+  if (!slug) throw new Error("Slug 不能为空");
+  const tags = $("f_tags").value.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
+  const base = {
+    kind: state.kind, slug, content: $("content").value,
+    published: $("f_published").value.trim() || new Date().toISOString().slice(0,10),
+    pinned: $("f_pinned").value === "true",
+  };
+  if (state.kind === "dynamic") return base;
+  return { ...base,
+    title: $("f_title").value.trim() || "无标题",
+    draft: $("f_draft").value === "true",
+    description: $("f_description").value.trim(),
+    tags, category: $("f_category").value.trim(),
+    comment: $("f_comment").value !== "false",
+    password: $("f_password").value.trim(),
+    mdx: state.mdx,
+  };
+}
+
+async function savePost(showMsg = true){
+  try {
+    const body = collect();
+    const r = await api("/api/post", { method:"POST", body: JSON.stringify(body) });
+    state.current = { kind: body.kind, slug: r.slug }; state.dirty = false;
+    $("saveHint").textContent = "已保存 " + new Date().toLocaleTimeString("zh-CN");
+    if (showMsg) setStatus("ok", "已保存");
+    await loadPosts();
+    return true;
+  } catch (e) { setStatus("err", "保存失败：" + e.message); return false; }
+}
+
+/* ───────── 发布 ───────── */
+function setStatus(cls, text){ $("status").innerHTML = `<span class="dot ${cls}"></span>${esc(text)}`; }
+
+async function publish(){
+  const ok = await savePost(false);
+  if (!ok) return;
+  if (!confirm("将重新构建网站并发布上线，约需 1-2 分钟。确定继续？")) return;
+  try {
+    await api("/api/build", { method:"POST" });
+    setStatus("busy","正在构建并发布…");
+    pollBuild();
+  } catch (e) { setStatus("err","构建启动失败：" + e.message); }
+}
+
+let pollTimer = null;
+async function pollBuild(){
+  clearTimeout(pollTimer);
+  try {
+    const s = await api("/api/build/status");
+    if (s.running) { setStatus("busy","构建中…（约 1-2 分钟）"); pollTimer = setTimeout(pollBuild, 3000); return; }
+    if (s.lastResult) {
+      if (s.lastResult.ok) setStatus("ok","发布成功！网站已更新");
+      else setStatus("err","构建失败，请查看构建日志");
+      await refreshSite(); await loadPosts();
+    } else setStatus("ok","就绪");
+  } catch { pollTimer = setTimeout(pollBuild, 4000); }
+}
+
+async function refreshSite(){
+  try {
+    const s = await api("/api/site");
+    $("siteTag").textContent = `${s.title || "站点"} · 磁盘 ${s.disk} · 后台占用 ${s.rssMB}MB`;
+  } catch {}
+}
+
+/* ───────── Markdown 预览（精简实现） ───────── */
+function md(src){
+  let h = esc(src);
+  const blocks = [];
+  h = h.replace(/```(\w*)\n([\s\S]*?)```/g, (m,lang,code) => {
+    blocks.push(`<pre><code>${code}</code></pre>`); return `\u0000${blocks.length-1}\u0000`;
+  });
+  h = h.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>");
+  h = h.replace(/^\s*&gt; (.*)$/gm,"<blockquote>$1</blockquote>");
+  h = h.replace(/^\s*[-*] (.*)$/gm,"<li>$1</li>").replace(/(<li>[\s\S]*?<\/li>)/g, m => "<ul>"+m+"</ul>");
+  h = h.replace(/^\s*\d+\. (.*)$/gm,"<li>$1</li>");
+  h = h.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/(^|[^*])\*([^*]+)\*/g,"$1<em>$2</em>");
+  h = h.replace(/`([^`]+)`/g,"<code>$1</code>");
+  h = h.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,'<img alt="$1" src="$2">');
+  h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  h = h.replace(/^---$/gm,"<hr>");
+  h = h.split(/\n{2,}/).map(p => /^\s*<(h\d|ul|ol|li|pre|blockquote|hr|table)/.test(p) ? p : `<p>${p.replace(/\n/g,"<br>")}</p>`).join("\n");
+  h = h.replace(/\u0000(\d+)\u0000/g, (m,i) => blocks[+i]);
+  return h;
+}
+function renderPreview(){ $("preview").innerHTML = md($("content").value) || '<p style="color:var(--fg3)">预览区</p>'; }
+
+/* ───────── 弹窗：音乐 / 友链 / 数据 ───────── */
+let modalCtx = null;
+
+function openModal(title, html, onSave){
+  $("mTitle").textContent = title; $("mBody").innerHTML = html;
+  $("modal").classList.add("on"); modalCtx = onSave;
+}
+function closeModal(){ $("modal").classList.remove("on"); modalCtx = null; }
+async function modalSave(){ if (modalCtx) await modalCtx(); }
+
+async function openMusic(){
+  const { data } = await api("/api/data?name=music");
+  const tracks = data.tracks || [];
+  const html = `
+    <p class="hint">音乐文件放到服务器的 <code>/opt/blog-src/public/assets/music/</code> 目录，
+    url 填 <code>/assets/music/文件名.mp3</code>；封面同理放 <code>/assets/music/cover/</code>。</p>
+    <div id="tracks">${tracks.map(trackRow).join("")}</div>
+    <button onclick="addTrack()">+ 添加一首</button>`;
+  openModal("音乐配置", html, async () => {
+    const list = [...document.querySelectorAll("#tracks .track")].map(el => ({
+      name: el.querySelector(".t-name").value.trim(),
+      artist: el.querySelector(".t-artist").value.trim(),
+      url: el.querySelector(".t-url").value.trim(),
+      cover: el.querySelector(".t-cover").value.trim(),
+      lrc: el.querySelector(".t-lrc").value.trim(),
+    })).filter(t => t.name && t.url);
+    await api("/api/data", { method:"POST", body: JSON.stringify({ name:"music", data:{ tracks:list } }) });
+    setStatus("ok","音乐已保存，点「保存并发布」后生效"); closeModal();
+  });
+}
+function trackRow(t = {}){
+  return `<div class="track">
+    <input class="t-name" placeholder="歌名" value="${esc(t.name||"")}">
+    <input class="t-artist" placeholder="歌手" value="${esc(t.artist||"")}">
+    <input class="t-url full" placeholder="音频路径 /assets/music/xxx.mp3" value="${esc(t.url||"")}">
+    <input class="t-cover" placeholder="封面路径（可选）" value="${esc(t.cover||"")}">
+    <input class="t-lrc" placeholder="歌词文件路径或留空" value="${esc(t.lrc||"")}">
+    <button class="danger ghost" onclick="this.parentNode.remove()">删除</button>
+  </div>`;
+}
+function addTrack(){ document.getElementById("tracks").insertAdjacentHTML("beforeend", trackRow()); }
+
+async function openData(name, title){
+  const { data } = await api("/api/data?name=" + name);
+  openModal(title, `<p class="hint">直接编辑 JSON（${name}.json）。保存后回到主页点「保存并发布」生效。</p>
+    <textarea id="jsonArea" style="height:44vh">${esc(JSON.stringify(data, null, 2))}</textarea>`, async () => {
+    let parsed;
+    try { parsed = JSON.parse($("jsonArea").value); } catch(e){ alert("JSON 格式错误：" + e.message); return; }
+    await api("/api/data", { method:"POST", body: JSON.stringify({ name, data: parsed }) });
+    setStatus("ok", title + "已保存"); closeModal();
+  });
+}
+
+async function openLog(){
+  const { log } = await api("/api/build/log");
+  openModal("构建日志", `<div id="log">${esc(log || "(空)")}</div>`);
+  $("mSave").style.display = "none";
+  setTimeout(()=>{ $("mSave").style.display = ""; }, 50);
+}
+
+/* ───────── 启动 ───────── */
+$("content").addEventListener("input", () => { state.dirty = true; $("saveHint").textContent = "未保存"; renderPreview(); });
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); savePost(); }
+});
+
+async function boot(){
+  await loadPosts(); await refreshSite();
+  if (!state.current) newPost();
+}
+
+(async function init(){
+  try {
+    const me = await api("/api/me");
+    if (me.authenticated) { showApp(); boot(); } else showLogin();
+  } catch { showLogin(); }
+})();
+</script>
+</body>
+</html>
