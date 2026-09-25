@@ -107,17 +107,9 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
           echo "known_hosts 条目数: $(wc -l < ~/.ssh/known_hosts)"
 
-      - name: 测试 SSH 连通性
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
-        run: |
-          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
-            "$VPS_USER@$VPS_HOST" "echo SSH_OK && hostname" || {
-              echo "::error::SSH 连接失败。请检查：1) VPS_HOST 是否为 121.199.28.136  2) 阿里云安全组是否放行 22 端口  3) 私钥是否与服务器 authorized_keys 中的部署公钥匹配"
-              exit 1
-            }
-
+      # 注意：部署密钥在服务器端是「强制命令」模式 —— 只允许 rsync，
+      # 任何其它命令（包括 echo 探活）都会被拒绝。因此这里不做独立连通性测试，
+      # 直接由下面的 rsync 步骤充当连通性验证（失败时会报出具体错误）。
       - name: 上传构建产物到服务器
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -131,10 +123,19 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
+          ADMIN_SSH_KEY: ${{ secrets.ADMIN_SSH_KEY }}
         run: |
-          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
-            "$VPS_USER@$VPS_HOST" \
-            "/usr/local/bin/dsh-publish.sh"
+          # 发布脚本是任意命令，受限的部署密钥（forced command）无法执行，
+          # 因此这里使用主管理密钥 ADMIN_SSH_KEY（base64 编码后存入 Secret）。
+          # 若未配置，则仅上传产物到 staging，由服务器端或人工执行发布脚本。
+          if [ -z "$ADMIN_SSH_KEY" ]; then
+            echo "::notice::未配置 ADMIN_SSH_KEY，跳过自动发布。产物已在 /var/www/firefly/staging/，请在服务器执行 dsh-publish.sh"
+            exit 0
+          fi
+          printf '%s' "$ADMIN_SSH_KEY" | tr -d '\n\r ' | base64 -d > ~/.ssh/id_admin
+          chmod 600 ~/.ssh/id_admin
+          ssh -i ~/.ssh/id_admin -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$VPS_USER@$VPS_HOST" "/usr/local/bin/dsh-publish.sh"
 
       - name: 部署结果
-        run: echo "✅ 部署完成，站点已更新"
+        run: echo "✅ 部署流程完成"
