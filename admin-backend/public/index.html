@@ -255,6 +255,10 @@ async function openRecovery(){
     <div style="margin-top:12px">
       <label style="display:block;font-size:13px;color:var(--fg2);margin-bottom:6px">你的回答</label>
       <input id="recAnswer" placeholder="请输入答案" autocomplete="off">
+      <div class="hint" style="margin-top:5px">
+        格式：姓名 + 空格 + 日期，例如 <code>张三 2024.07.19</code>
+        （日期写 <code>2024.7.19</code> 也接受）
+      </div>
     </div>
     <div class="msg" id="recMsg"></div>
     <div id="recStep2" style="display:none;margin-top:6px">

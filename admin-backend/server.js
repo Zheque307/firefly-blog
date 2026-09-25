@@ -105,11 +105,13 @@ function verifyPassword(input) {
 /**
  * 默认密保配置。答案以 SHA-256 存储（不落明文），比较使用恒定时间算法。
  * 若 /opt/blog-admin/data/security.json 存在则优先使用其中的配置。
+ *
+ * 支持多个等价答案：answerHashes 数组中的任意一个匹配即视为正确。
+ * 用于兼容同一答案的不同书写格式（例如日期 7.19 与 07.19）。
  */
 const DEFAULT_SECURITY = {
-  question: "我的对象叫什么名字",
-  // SHA-256("李泽旭")
-  answerHash: "REPLACED_AT_DEPLOY_TIME",
+  question: "我对象的名字以及表白的日子",
+  answerHashes: [],
 };
 
 let securityConfig = { ...DEFAULT_SECURITY };
@@ -117,6 +119,16 @@ try {
   securityConfig = { ...DEFAULT_SECURITY, ...JSON.parse(fs.readFileSync(SECURITY_FILE, "utf8")) };
 } catch {
   /* 使用默认值 */
+}
+
+/** 兼容旧的单值写法：answerHash -> [answerHash] */
+function answerHashList() {
+  const list = [];
+  if (Array.isArray(securityConfig.answerHashes)) {
+    for (const h of securityConfig.answerHashes) if (h) list.push(String(h));
+  }
+  if (securityConfig.answerHash) list.push(String(securityConfig.answerHash));
+  return list;
 }
 
 /** 答案归一化：去首尾空白、去掉所有空白字符、转小写（对中文无影响，对英文有用） */
@@ -130,11 +142,15 @@ function hashAnswer(s) {
   return crypto.createHash("sha256").update(normalizeAnswer(s), "utf8").digest("hex");
 }
 
+/** 任意一个已登记的答案哈希匹配即通过；全部使用恒定时间比较 */
 function verifyAnswer(input) {
   const got = Buffer.from(hashAnswer(input), "utf8");
-  const want = Buffer.from(String(securityConfig.answerHash || ""), "utf8");
-  if (got.length !== want.length) return false;
-  return crypto.timingSafeEqual(got, want);
+  let ok = false;
+  for (const h of answerHashList()) {
+    const want = Buffer.from(h, "utf8");
+    if (got.length === want.length && crypto.timingSafeEqual(got, want)) ok = true;
+  }
+  return ok;
 }
 
 /* ───────────────────────── 登录限速（防暴力破解） ───────────────────────── */
