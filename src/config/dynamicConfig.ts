@@ -10,8 +10,8 @@ export const dynamicConfig: DynamicConfig = {
 	// 动态头像和名称的跳转地址，支持站内路径或完整 URL
 	profileUrl: "/about/",
 
-	// 是否为每条动态启用评论，需要先在 commentConfig.ts 启用评论系统
-	showComment: true,
+	// 是否为每条动态启用评论（本站不需要评论，已关闭）
+	showComment: false,
 
 	// 每页显示的动态数量
 	itemsPerPage: 20,
