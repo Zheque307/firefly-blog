@@ -130,6 +130,7 @@
     <div class="sp"></div>
     <button class="ghost" onclick="openMusic()">音乐配置</button>
     <button class="ghost" onclick="openData('friends','友链配置')">友链</button>
+    <button class="ghost" onclick="openBans()">IP 封禁</button>
     <button class="ghost" onclick="openLog()">构建日志</button>
     <button onclick="logout()">退出</button>
   </header>
@@ -381,7 +382,12 @@ function openModal(title, html, onSave){
   $("mTitle").textContent = title; $("mBody").innerHTML = html;
   $("modal").classList.add("on"); modalCtx = onSave;
 }
-function closeModal(){ $("modal").classList.remove("on"); modalCtx = null; }
+function closeModal(){
+  $("modal").classList.remove("on");
+  modalCtx = null;
+  if (typeof banTimer !== "undefined" && banTimer) { clearInterval(banTimer); banTimer = null; }
+  $("mSave").style.display = "";
+}
 async function modalSave(){ if (modalCtx) await modalCtx(); }
 
 async function openMusic(){
@@ -432,6 +438,90 @@ async function openLog(){
   openModal("构建日志", `<div id="log">${esc(log || "(空)")}</div>`);
   $("mSave").style.display = "none";
   setTimeout(()=>{ $("mSave").style.display = ""; }, 50);
+}
+
+/* ───────── 封禁 IP 管理 ───────── */
+let banTimer = null;
+
+async function openBans(){
+  openModal("IP 封禁管理", `<div id="banWrap">加载中…</div>`);
+  $("mSave").style.display = "none";
+  await renderBans();
+  clearInterval(banTimer);
+  banTimer = setInterval(() => { if ($("modal").classList.contains("on")) renderBans(); }, 10000);
+}
+
+async function renderBans(){
+  const wrap = $("banWrap");
+  if (!wrap) { clearInterval(banTimer); return; }
+  let d;
+  try { d = await api("/api/bans"); }
+  catch (e) { wrap.innerHTML = `<div style="color:var(--err)">读取失败：${esc(e.message)}</div>`; return; }
+
+  const jailLabel = { "blog-admin": "后台登录", "recidive": "累犯（永久）" };
+  let rows = "", total = 0;
+  for (const j of (d.jails || [])) {
+    for (const ip of (j.banned || [])) {
+      total++;
+      const isPerm = j.jail === "recidive";
+      rows += `
+        <tr>
+          <td style="font-family:ui-monospace,Menlo,monospace">${esc(ip)}</td>
+          <td>${esc(jailLabel[j.jail] || j.jail)}</td>
+          <td>${isPerm
+            ? '<span class="pill" style="color:#f87171;border-color:rgba(248,113,113,.5)">永久</span>'
+            : '<span class="pill" style="color:#fbbf24;border-color:rgba(251,191,36,.45)">1 小时</span>'}</td>
+          <td style="text-align:right">
+            <button class="danger ghost" onclick="unbanIp('${esc(ip)}')">解除</button>
+          </td>
+        </tr>`;
+    }
+  }
+
+  wrap.innerHTML = `
+    <p class="hint">
+      多次输错后台密码的 IP 会被自动封禁（30 分钟内 5 次 → 1 小时）。<br>
+      被封禁过的 IP 一周内<b>再犯 3 次即永久封禁</b>。封禁在网络层执行，该 IP 将完全无法访问服务器。
+    </p>
+    <div style="margin:12px 0;display:flex;gap:8px;align-items:center">
+      <input id="banIp" placeholder="手动封禁某个 IP，例如 1.2.3.4" style="flex:1">
+      <button onclick="manualBan()">封禁</button>
+      <button class="ghost" onclick="renderBans()">刷新</button>
+    </div>
+    ${total === 0
+      ? '<div style="padding:22px;text-align:center;color:var(--fg3)">当前没有被封禁的 IP ✓</div>'
+      : `<table style="width:100%;border-collapse:collapse">
+           <thead><tr style="color:var(--fg2);font-size:12px">
+             <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)">IP 地址</th>
+             <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)">来源</th>
+             <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)">时长</th>
+             <th style="border-bottom:1px solid var(--line)"></th>
+           </tr></thead>
+           <tbody>${rows}</tbody>
+         </table>`}
+    <div class="hint" style="margin-top:10px">共 ${total} 个被封 IP · 每 10 秒自动刷新</div>`;
+}
+
+async function unbanIp(ip){
+  if (!confirm(`确定解除对 ${ip} 的封禁？`)) return;
+  try {
+    const r = await api("/api/bans", { method:"POST", body: JSON.stringify({ action:"unban", ip }) });
+    if (r && r.ok === false) alert(r.error || "解除失败");
+    else setStatus("ok", `已解除 ${ip} 的封禁`);
+  } catch (e) { alert("解除失败：" + e.message); }
+  renderBans();
+}
+
+async function manualBan(){
+  const ip = ($("banIp").value || "").trim();
+  if (!ip) return;
+  if (!confirm(`确定封禁 ${ip}？该 IP 将完全无法访问服务器。`)) return;
+  try {
+    const r = await api("/api/bans", { method:"POST", body: JSON.stringify({ action:"ban", ip }) });
+    if (r && r.ok === false) alert(r.error || "封禁失败");
+    else { $("banIp").value = ""; setStatus("ok", `已封禁 ${ip}`); }
+  } catch (e) { alert("封禁失败：" + e.message); }
+  renderBans();
 }
 
 /* ───────── 启动 ───────── */

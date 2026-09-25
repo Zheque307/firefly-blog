@@ -27,6 +27,7 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const net = require("node:net");
 const { execFile } = require("node:child_process");
 
 const BIND_HOST = process.env.BIND_HOST || "127.0.0.1";
@@ -46,6 +47,7 @@ const PROFILE_JSON = path.join(SRC_DIR, "src/data/profile.json");
 const SESSION_FILE = path.join(DATA_DIR, "sessions.json");
 const BUILD_LOG = "/var/log/dsh-build.log";
 const BUILD_SCRIPT = "/usr/local/bin/dsh-build-publish.sh";
+const F2B_HELPER = "/usr/local/sbin/dsh-fail2ban-admin";
 
 if (!ADMIN_PASSWORD) {
   console.error("FATAL: ADMIN_PASSWORD is not set");
@@ -335,6 +337,41 @@ function runBuild() {
   return { started: true };
 }
 
+/** 校验 IPv4 / IPv6 字面量，防止把任意字符串交给外部命令 */
+function isValidIp(ip) {
+  if (typeof ip !== "string" || !ip || ip.length > 45) return false;
+  if (net.isIPv4(ip) || net.isIPv6(ip)) return true;
+  return false;
+}
+
+/**
+ * 调用受 sudoers 白名单限制的 fail2ban 助手脚本。
+ * 该脚本只接受 list / unban <IP> / ban <IP> 三种固定形态。
+ */
+function runHelper(args) {
+  return new Promise((resolve) => {
+    execFile(
+      "sudo",
+      ["-n", F2B_HELPER, ...args],
+      { timeout: 15000, maxBuffer: 1024 * 1024 },
+      (err, stdout, stderr) => {
+        const out = String(stdout || "").trim();
+        if (err && !out) {
+          resolve({ error: String(stderr || err.message || "助手脚本执行失败").trim() });
+          return;
+        }
+        let parsed = null;
+        try {
+          parsed = JSON.parse(out);
+        } catch {
+          /* 保持 parsed = null，交由调用方处理 */
+        }
+        resolve({ stdout: out, parsed, error: null });
+      },
+    );
+  });
+}
+
 /* ───────────────────────── 路由 ───────────────────────── */
 
 const MIME = {
@@ -574,6 +611,41 @@ async function handleApi(req, res, urlPath, query) {
     return json(res, r.started ? 200 : 409, r);
   }
 
+  /* ── 封禁名单管理 ──
+   * 通过受限特权脚本 /usr/local/sbin/dsh-fail2ban-admin 操作 fail2ban，
+   * 该脚本在 /etc/sudoers.d/blog-admin-fail2ban 中被白名单授权给 blogadmin，
+   * 且内部对 IP 参数做严格校验，不会形成任意命令执行。
+   */
+  if (urlPath === "/api/bans" && req.method === "GET") {
+    const r = await runHelper(["list"]);
+    if (r.error) return json(res, 500, { error: r.error });
+    return json(res, 200, r.parsed || { ok: false, error: "解析失败", raw: r.stdout });
+  }
+
+  if (urlPath === "/api/bans" && req.method === "POST") {
+    const body = JSON.parse((await readBody(req)) || "{}");
+    const action = String(body.action || "");
+    const ip = String(body.ip || "").trim();
+    // 服务端再次校验 IP，绝不把任意字符串交给外部命令
+    if (ip && !isValidIp(ip)) return json(res, 400, { error: "非法 IP 地址" });
+    if (action === "unban") {
+      if (!ip) return json(res, 400, { error: "缺少 IP" });
+      const r = await runHelper(["unban", ip]);
+      if (r.error) return json(res, 500, { error: r.error });
+      authLog(`unbanned ${ip}`, clientIp(req));
+      return json(res, r.parsed && r.parsed.ok ? 200 : 400, r.parsed || { error: r.stdout });
+    }
+    if (action === "ban") {
+      if (!ip) return json(res, 400, { error: "缺少 IP" });
+      const r = await runHelper(["ban", ip]);
+      if (r.error) return json(res, 500, { error: r.error });
+      authLog(`manually banned ${ip}`, clientIp(req));
+      return json(res, r.parsed && r.parsed.ok ? 200 : 400, r.parsed || { error: r.stdout });
+    }
+    return json(res, 400, { error: "未知操作" });
+  }
+
+  /* 构建状态 */
   if (urlPath === "/api/build/status" && req.method === "GET") {
     return json(res, 200, buildState);
   }
