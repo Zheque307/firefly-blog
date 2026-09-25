@@ -48,24 +48,92 @@ jobs:
           du -sh dist
           ls dist | head -20
 
-      - name: 配置 SSH
+      - name: 检查 Secrets 是否配置
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
+          fail=0
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY; do
+            val="${!name}"
+            if [ -z "$val" ]; then
+              echo "::error::Secret $name 为空或未配置（请在仓库 Settings → Secrets and variables → Actions 中添加）"
+              fail=1
+            else
+              echo "$name 已配置，长度 ${#val}"
+            fi
+          done
+          [ "$fail" -eq 0 ] || exit 1
+
+      - name: 配置 SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_deploy
+          chmod 700 ~/.ssh
+
+          # 自动兼容两种 Secret 格式：
+          #   A) base64 编码后的私钥（本项目最初提供的方式）
+          #   B) 直接粘贴的原始私钥文本（含 BEGIN/END 行）
+          if printf '%s' "$VPS_SSH_KEY" | grep -q "BEGIN OPENSSH PRIVATE KEY"; then
+            echo "检测到原始私钥文本格式，直接写入"
+            printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_deploy
+          else
+            echo "按 base64 解码私钥"
+            if ! printf '%s' "$VPS_SSH_KEY" | tr -d '\n\r ' | base64 -d > ~/.ssh/id_deploy 2>/dev/null; then
+              echo "::error::VPS_SSH_KEY 既不是合法 base64，也不含 'BEGIN OPENSSH PRIVATE KEY'"
+              echo "::error::请确认 Secret 内容：应为「私钥文件的 base64 编码」或「私钥文件原文」"
+              exit 1
+            fi
+          fi
+
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+          if ! grep -q "PRIVATE KEY" ~/.ssh/id_deploy; then
+            echo "::error::解码后不是有效的私钥，请重新复制 Secret 内容（注意不要漏字符、不要带多余空格）"
+            head -c 60 ~/.ssh/id_deploy
+            exit 1
+          fi
+          echo "私钥格式校验通过（$(head -1 ~/.ssh/id_deploy)）"
+
+          if [ -z "${VPS_HOST:-}" ]; then
+            echo "::error::VPS_HOST 为空"
+            exit 1
+          fi
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           chmod 600 ~/.ssh/known_hosts
+          echo "known_hosts 条目数: $(wc -l < ~/.ssh/known_hosts)"
+
+      - name: 测试 SSH 连通性
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$VPS_USER@$VPS_HOST" "echo SSH_OK && hostname" || {
+              echo "::error::SSH 连接失败。请检查：1) VPS_HOST 是否为 121.199.28.136  2) 阿里云安全组是否放行 22 端口  3) 私钥是否与服务器 authorized_keys 中的部署公钥匹配"
+              exit 1
+            }
 
       - name: 上传构建产物到服务器
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           rsync -avz --delete \
             -e "ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes" \
-            dist/ "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/firefly/staging/"
+            dist/ "$VPS_USER@$VPS_HOST:/var/www/firefly/staging/"
 
       - name: 原子发布并验证
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
-            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "$VPS_USER@$VPS_HOST" \
             "/usr/local/bin/dsh-publish.sh"
 
       - name: 部署结果
