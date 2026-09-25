@@ -73,17 +73,15 @@ export const backgroundWallpaper: BackgroundWallpaperConfig = {
 			// 是否启用主页横幅文字
 			enable: true,
 			// 主页横幅主标题
-			title: "Lovely firefly!",
+			title: "折鹊的小屋",
 			// 主页横幅主标题字体大小
 			titleSize: "4.5rem",
 			// 主页横幅副标题
 			subtitle: [
-				"In Reddened Chrysalis, I Once Rest",
-				"From Shattered Sky, I Free Fall",
-				"Amidst Silenced Stars, I Deep Sleep",
-				"Upon Lighted Fyrefly, I Soon Gaze",
-				"From Undreamt Night, I Thence Shine",
-				"In Finalized Morrow, I Full Bloom",
+				"愿你我都如星火，照亮彼此",
+				"记录生活，也记录热爱",
+				"在这里安放一些细碎的心事",
+				"慢慢来，比较快",
 			],
 			// 主页横幅副标题字体大小
 			subtitleSize: "1.5rem",
@@ -105,25 +103,28 @@ export const backgroundWallpaper: BackgroundWallpaperConfig = {
 			// 图标支持 Iconify 格式：fa7-brands:github、fa7-solid:envelope、mdi:rss 等
 			links: [
 				{
-					name: "GitHub",
-					icon: "fa7-brands:github",
-					url: "https://github.com/CuteLeaf/Firefly",
+					name: "QQ",
+					icon: "fa7-brands:qq",
+					url: "https://wpa.qq.com/msgrd?v=3&uin=1504144131&site=qq&menu=yes",
 					showName: true,
 				},
 				{
-					name: "Email",
+					name: "邮箱",
 					icon: "fa7-solid:envelope",
-					url: "mailto:xiaye@msn.com",
+					url: "mailto:1504144131@qq.com",
+					showName: true,
 				},
 				{
-					name: "Sponsor",
-					icon: "material-symbols:favorite",
-					url: "https://blog.cuteleaf.cn/sponsor/",
+					name: "留言板",
+					icon: "material-symbols:chat",
+					url: "/guestbook/",
+					showName: true,
 				},
 				{
 					name: "RSS",
 					icon: "fa7-solid:rss",
 					url: "/rss/",
+					showName: true,
 				},
 			],
 		},

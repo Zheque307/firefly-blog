@@ -53,3 +53,4 @@ package/
 src/constants/lqips.json.bak
 *.log
 Thumbs.db
+[Dd]ds*

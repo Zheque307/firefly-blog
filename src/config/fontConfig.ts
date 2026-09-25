@@ -24,34 +24,62 @@
 import type { FontDefinition, FontSelectionConfig } from "@/types/fontConfig";
 
 // ─── Astro Font API 字体定义 ───────────────────────────────
-// 适用于 Astro Font API 的字体配置，支持自动下载、缓存和优化加载
-// 本地开发调试的情况下，修改后需要每次重启开发服务器才能生效
+// 说明（DSH 修改）：
+//   1. 字体文件已内置到 public/assets/fonts/vendored/，改用 local 提供者，
+//      构建过程 100% 离线，不再依赖 cdn.jsdelivr.net（大陆服务器拉取不稳定）。
+//   2. Zen Maru Gothic 在 Fontsource 上只有 300/400/500/700/900 字重，
+//      原配置里的 "600" 并不存在，会导致构建报 CannotFetchFontFile 而失败。
 export const fontsList: FontDefinition[] = [
 	{
 		name: "Zen Maru Gothic",
 		cssVariable: "--font-zen-maru-gothic",
-		provider: "fontsource",
-		weights: ["300", "400", "500", "600", "700"],
-		styles: ["normal"],
-		subsets: ["latin", "cyrillic"],
+		provider: "local",
+		options: {
+			variants: [
+				{ src: ["./public/assets/fonts/vendored/zen-maru-gothic-latin-300-normal.woff2"], weight: "300", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/zen-maru-gothic-latin-400-normal.woff2"], weight: "400", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/zen-maru-gothic-latin-500-normal.woff2"], weight: "500", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/zen-maru-gothic-latin-700-normal.woff2"], weight: "700", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/zen-maru-gothic-cyrillic-300-normal.woff2"], weight: "300", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/zen-maru-gothic-cyrillic-400-normal.woff2"], weight: "400", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/zen-maru-gothic-cyrillic-500-normal.woff2"], weight: "500", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/zen-maru-gothic-cyrillic-700-normal.woff2"], weight: "700", style: "normal" },
+			],
+		},
 		fallbacks: ["sans-serif"],
 	},
 	{
 		name: "Inter",
 		cssVariable: "--font-inter",
-		provider: "fontsource",
-		weights: ["300", "400", "500", "600", "700"],
-		styles: ["normal"],
-		subsets: ["latin", "cyrillic"],
+		provider: "local",
+		options: {
+			variants: [
+				{ src: ["./public/assets/fonts/vendored/inter-latin-300-normal.woff2"], weight: "300", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-latin-400-normal.woff2"], weight: "400", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-latin-500-normal.woff2"], weight: "500", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-latin-600-normal.woff2"], weight: "600", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-latin-700-normal.woff2"], weight: "700", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-cyrillic-300-normal.woff2"], weight: "300", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-cyrillic-400-normal.woff2"], weight: "400", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-cyrillic-500-normal.woff2"], weight: "500", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-cyrillic-600-normal.woff2"], weight: "600", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/inter-cyrillic-700-normal.woff2"], weight: "700", style: "normal" },
+			],
+		},
 		fallbacks: ["sans-serif"],
 	},
 	{
 		name: "JetBrains Mono",
 		cssVariable: "--font-jetbrains-mono",
-		provider: "fontsource",
-		weights: ["400", "700"],
-		styles: ["normal"],
-		subsets: ["latin", "cyrillic"],
+		provider: "local",
+		options: {
+			variants: [
+				{ src: ["./public/assets/fonts/vendored/jetbrains-mono-latin-400-normal.woff2"], weight: "400", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/jetbrains-mono-latin-700-normal.woff2"], weight: "700", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/jetbrains-mono-cyrillic-400-normal.woff2"], weight: "400", style: "normal" },
+				{ src: ["./public/assets/fonts/vendored/jetbrains-mono-cyrillic-700-normal.woff2"], weight: "700", style: "normal" },
+			],
+		},
 		fallbacks: [
 			"ui-monospace",
 			"SFMono-Regular",
