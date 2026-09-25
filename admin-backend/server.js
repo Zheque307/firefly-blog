@@ -48,6 +48,9 @@ const SESSION_FILE = path.join(DATA_DIR, "sessions.json");
 const BUILD_LOG = "/var/log/dsh-build.log";
 const BUILD_SCRIPT = "/usr/local/bin/dsh-build-publish.sh";
 const F2B_HELPER = "/usr/local/sbin/dsh-fail2ban-admin";
+const F2B_LIST_BIN = "/usr/local/sbin/dsh-f2b-list";
+const F2B_BAN_BIN = "/usr/local/sbin/dsh-f2b-ban";
+const F2B_UNBAN_BIN = "/usr/local/sbin/dsh-f2b-unban";
 const SETPW_HELPER = "/usr/local/sbin/dsh-set-password";
 const SECURITY_FILE = path.join(DATA_DIR, "security.json");
 
@@ -423,17 +426,21 @@ function isValidIp(ip) {
  *                         否则默认调用 fail2ban 助手（兼容 runHelper(["list"])）。
  * @param {string|null} stdinData  非 null 时写入子进程 stdin。
  *                                 密码走 stdin 而非命令行，避免出现在 ps 输出里。
+ * @param {object|null} extraEnv   额外环境变量（用于把 IP 等数据传给无参数 wrapper）。
  */
-function runHelper(args, stdinData = null) {
+function runHelper(args, stdinData = null, extraEnv = null) {
   const first = String(args[0] ?? "");
   const script = first.startsWith("/") ? first : F2B_HELPER;
   const rest = first.startsWith("/") ? args.slice(1) : args;
+
+  /** 子进程环境：剔除可能干扰的外部变量，只保留必要项并叠加 extraEnv */
+  const childEnv = { ...process.env, ...(extraEnv || {}) };
 
   return new Promise((resolve) => {
     const child = execFile(
       "sudo",
       ["-n", script, ...rest],
-      { timeout: 15000, maxBuffer: 1024 * 1024 },
+      { timeout: 15000, maxBuffer: 1024 * 1024, env: childEnv },
       (err, stdout, stderr) => {
         const out = String(stdout || "").trim();
         if (err && !out) {
@@ -763,12 +770,13 @@ async function handleApi(req, res, urlPath, query) {
   }
 
   /* ── 封禁名单管理 ──
-   * 通过受限特权脚本 /usr/local/sbin/dsh-fail2ban-admin 操作 fail2ban，
-   * 该脚本在 /etc/sudoers.d/blog-admin-fail2ban 中被白名单授权给 blogadmin，
-   * 且内部对 IP 参数做严格校验，不会形成任意命令执行。
+   * sudoers 只能按「完整命令行」授权，且是 glob 而非正则，
+   * 因此这里不走命令行传 IP，而是把操作与 IP 放到环境变量里，
+   * 交给固定路径、无参数的 wrapper 脚本执行。
+   * sudoers 只放行这几个脚本的【无参数调用】，参数滥用被彻底堵死。
    */
   if (urlPath === "/api/bans" && req.method === "GET") {
-    const r = await runHelper(["list"]);
+    const r = await runHelper([F2B_LIST_BIN], null);
     if (r.error) return json(res, 500, { error: r.error });
     return json(res, 200, r.parsed || { ok: false, error: "解析失败", raw: r.stdout });
   }
@@ -777,20 +785,14 @@ async function handleApi(req, res, urlPath, query) {
     const body = JSON.parse((await readBody(req)) || "{}");
     const action = String(body.action || "");
     const ip = String(body.ip || "").trim();
-    // 服务端再次校验 IP，绝不把任意字符串交给外部命令
+    // 服务端严格校验 IP，绝不把任意字符串交给外部命令
     if (ip && !isValidIp(ip)) return json(res, 400, { error: "非法 IP 地址" });
-    if (action === "unban") {
+    if (action === "unban" || action === "ban") {
       if (!ip) return json(res, 400, { error: "缺少 IP" });
-      const r = await runHelper(["unban", ip]);
+      const bin = action === "ban" ? F2B_BAN_BIN : F2B_UNBAN_BIN;
+      const r = await runHelper([bin], null, { DSH_IP: ip, DSH_ACTION: action });
       if (r.error) return json(res, 500, { error: r.error });
-      authLog(`unbanned ${ip}`, clientIp(req));
-      return json(res, r.parsed && r.parsed.ok ? 200 : 400, r.parsed || { error: r.stdout });
-    }
-    if (action === "ban") {
-      if (!ip) return json(res, 400, { error: "缺少 IP" });
-      const r = await runHelper(["ban", ip]);
-      if (r.error) return json(res, 500, { error: r.error });
-      authLog(`manually banned ${ip}`, clientIp(req));
+      authLog(`manually ${action}ned ${ip}`, clientIp(req));
       return json(res, r.parsed && r.parsed.ok ? 200 : 400, r.parsed || { error: r.stdout });
     }
     return json(res, 400, { error: "未知操作" });

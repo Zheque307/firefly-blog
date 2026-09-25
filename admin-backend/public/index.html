@@ -304,8 +304,20 @@ async function saveRecoveredPassword(){
   if (p1 !== p2) { $("recMsg").style.color = "var(--err)"; $("recMsg").textContent = "两次输入不一致"; return; }
   try {
     const r = await api("/api/security/reset", { method:"POST", body: JSON.stringify({ token: recToken, newPassword: p1 }) });
-    alert(r.message || "密码已重置，即将进入后台");
-    location.reload();
+    // 密码存于 EnvironmentFile，服务需重启才会加载新密码（脚本会自动延迟重启）。
+    // 直接刷新会撞上重启空窗期并可能触发登录限速，因此这里提示用户稍等。
+    openModal("密码已重置", `
+      <p style="color:var(--ok)">✓ 新密码已保存</p>
+      <p class="hint">
+        后台服务正在自动重启以加载新密码，约需 <b>5~10 秒</b>。<br>
+        请等待后点击下面按钮重新登录（<b>不要连续刷新</b>，否则可能触发登录限速）。
+      </p>
+      <p class="hint">新密码已生效后，用新密码登录即可。</p>
+      <div style="text-align:center;margin-top:16px">
+        <button class="primary" onclick="location.reload()">我已等待，去登录</button>
+      </div>`);
+    $("mSave").style.display = "none";
+    setTimeout(() => { $("mSave").style.display = ""; }, 50);
   } catch (e) {
     $("recMsg").style.color = "var(--err)";
     $("recMsg").textContent = e.message || "重置失败";
