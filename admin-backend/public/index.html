@@ -119,6 +119,12 @@
     <input type="password" id="pw" placeholder="管理密码" autocomplete="current-password">
     <div class="msg" id="loginMsg"></div>
     <button class="primary" style="width:100%;margin-top:6px" onclick="doLogin()">登录</button>
+    <div style="text-align:center;margin-top:14px">
+      <a href="javascript:void(0)" onclick="openRecovery()"
+         style="color:var(--fg2);font-size:13px;text-decoration:none;border-bottom:1px dashed var(--line2);padding-bottom:2px">
+        忘记密码？通过密保问题重置
+      </a>
+    </div>
   </div>
 </div>
 
@@ -219,6 +225,92 @@ async function doLogin(){
 $("pw").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
 
 async function logout(){ await fetch("/api/logout", {method:"POST",credentials:"same-origin"}); location.reload(); }
+
+/* ───────── 密保找回密码 ───────── */
+let recToken = null;
+
+async function openRecovery(){
+  recToken = null;
+  let q = { question: "", locked: false, lockRemainingMs: 0 };
+  try { q = await api("/api/security/question"); } catch (e) { /* 用默认 */ }
+
+  if (q.locked) {
+    const min = Math.ceil((q.lockRemainingMs || 0) / 60000);
+    openModal("通过密保重置密码",
+      `<p style="color:var(--err)">密保回答错误次数过多，已锁定，请 ${min} 分钟后再试。</p>
+       <p class="hint">提示：封禁在服务器防火墙层执行，锁定期间该 IP 无法访问。</p>`);
+    $("mSave").style.display = "none";
+    setTimeout(() => { $("mSave").style.display = ""; }, 50);
+    return;
+  }
+
+  openModal("通过密保重置密码", `
+    <p class="hint">回答正确后即可设置新密码。答案连续输错 3 次将封禁该 IP。</p>
+    <div style="margin-top:14px">
+      <label style="display:block;font-size:13px;color:var(--fg2);margin-bottom:6px">密保问题</label>
+      <div style="padding:10px 12px;background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:10px">
+        ${esc(q.question || "（未配置密保问题）")}
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <label style="display:block;font-size:13px;color:var(--fg2);margin-bottom:6px">你的回答</label>
+      <input id="recAnswer" placeholder="请输入答案" autocomplete="off">
+    </div>
+    <div class="msg" id="recMsg"></div>
+    <div id="recStep2" style="display:none;margin-top:6px">
+      <div style="margin-top:6px">
+        <label style="display:block;font-size:13px;color:var(--fg2);margin-bottom:6px">新密码（至少 10 位，含字母和数字）</label>
+        <input type="password" id="recNew1" autocomplete="new-password">
+      </div>
+      <div style="margin-top:10px">
+        <label style="display:block;font-size:13px;color:var(--fg2);margin-bottom:6px">再输一次</label>
+        <input type="password" id="recNew2" autocomplete="new-password">
+      </div>
+    </div>`);
+
+  modalCtx = async () => {
+    if (!recToken) return verifyRecoveryAnswer();
+    return saveRecoveredPassword();
+  };
+  setTimeout(() => { const el = $("recAnswer"); if (el) el.focus(); }, 60);
+}
+
+async function verifyRecoveryAnswer(){
+  const answer = ($("recAnswer") && $("recAnswer").value) || "";
+  if (!answer.trim()) { $("recMsg").textContent = "请输入答案"; return; }
+  try {
+    const r = await api("/api/security/verify", { method:"POST", body: JSON.stringify({ answer }) });
+    recToken = r.token;
+    // 验证通过：展开新密码输入
+    $("recAnswer").disabled = true;
+    $("recStep2").style.display = "block";
+    $("recMsg").textContent = "✓ 验证通过，请设置新密码";
+    $("recMsg").style.color = "var(--ok)";
+    $("mSave").textContent = "重置密码";
+    setTimeout(() => { const el = $("recNew1"); if (el) el.focus(); }, 60);
+  } catch (e) {
+    $("recMsg").style.color = "var(--err)";
+    $("recMsg").textContent = e.message || "答案错误";
+  }
+}
+
+async function saveRecoveredPassword(){
+  const p1 = ($("recNew1") && $("recNew1").value) || "";
+  const p2 = ($("recNew2") && $("recNew2").value) || "";
+  if (p1.length < 10) { $("recMsg").style.color = "var(--err)"; $("recMsg").textContent = "新密码至少 10 位"; return; }
+  if (!/[A-Za-z]/.test(p1) || !/[0-9]/.test(p1)) {
+    $("recMsg").style.color = "var(--err)"; $("recMsg").textContent = "新密码需同时包含字母和数字"; return;
+  }
+  if (p1 !== p2) { $("recMsg").style.color = "var(--err)"; $("recMsg").textContent = "两次输入不一致"; return; }
+  try {
+    const r = await api("/api/security/reset", { method:"POST", body: JSON.stringify({ token: recToken, newPassword: p1 }) });
+    alert(r.message || "密码已重置，即将进入后台");
+    location.reload();
+  } catch (e) {
+    $("recMsg").style.color = "var(--err)";
+    $("recMsg").textContent = e.message || "重置失败";
+  }
+}
 
 /* ───────── 文章列表 ───────── */
 function fmtTime(ms){ const d=new Date(ms); return d.toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}); }

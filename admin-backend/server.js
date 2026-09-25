@@ -48,6 +48,8 @@ const SESSION_FILE = path.join(DATA_DIR, "sessions.json");
 const BUILD_LOG = "/var/log/dsh-build.log";
 const BUILD_SCRIPT = "/usr/local/bin/dsh-build-publish.sh";
 const F2B_HELPER = "/usr/local/sbin/dsh-fail2ban-admin";
+const SETPW_HELPER = "/usr/local/sbin/dsh-set-password";
+const SECURITY_FILE = path.join(DATA_DIR, "security.json");
 
 if (!ADMIN_PASSWORD) {
   console.error("FATAL: ADMIN_PASSWORD is not set");
@@ -95,11 +97,57 @@ function verifyPassword(input) {
   return crypto.timingSafeEqual(a, b);
 }
 
+/* ───────────────────────── 密保问题 ───────────────────────── */
+
+/**
+ * 默认密保配置。答案以 SHA-256 存储（不落明文），比较使用恒定时间算法。
+ * 若 /opt/blog-admin/data/security.json 存在则优先使用其中的配置。
+ */
+const DEFAULT_SECURITY = {
+  question: "我的对象叫什么名字",
+  // SHA-256("李泽旭")
+  answerHash: "REPLACED_AT_DEPLOY_TIME",
+};
+
+let securityConfig = { ...DEFAULT_SECURITY };
+try {
+  securityConfig = { ...DEFAULT_SECURITY, ...JSON.parse(fs.readFileSync(SECURITY_FILE, "utf8")) };
+} catch {
+  /* 使用默认值 */
+}
+
+/** 答案归一化：去首尾空白、去掉所有空白字符、转小写（对中文无影响，对英文有用） */
+function normalizeAnswer(s) {
+  return String(s ?? "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function hashAnswer(s) {
+  return crypto.createHash("sha256").update(normalizeAnswer(s), "utf8").digest("hex");
+}
+
+function verifyAnswer(input) {
+  const got = Buffer.from(hashAnswer(input), "utf8");
+  const want = Buffer.from(String(securityConfig.answerHash || ""), "utf8");
+  if (got.length !== want.length) return false;
+  return crypto.timingSafeEqual(got, want);
+}
+
 /* ───────────────────────── 登录限速（防暴力破解） ───────────────────────── */
 
 const LOGIN_MAX_FAILS = 5;              // 允许的连续失败次数
 const LOGIN_LOCK_MS = 15 * 60 * 1000;   // 锁定时长
 const loginFails = new Map();           // ip -> { count, first, lockedUntil }
+
+// 密保回答的错误次数独立计数，且更严格：错 3 次即锁定并触发 fail2ban
+const SEC_MAX_FAILS = 3;
+const SEC_LOCK_MS = 15 * 60 * 1000;
+const secFails = new Map();
+
+// 密保验证通过后发放的一次性重置令牌
+const RESET_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 分钟内有效
+const resetTokens = new Map();
 
 function clientIp(req) {
   // 优先级：X-Client-IP（nginx 专为本站添加的真实客户端 IP）
@@ -141,29 +189,52 @@ function loginLockRemaining(ip) {
 }
 
 function recordLoginFail(ip) {
-  const now = Date.now();
-  const rec = loginFails.get(ip) || { count: 0, first: now, lockedUntil: 0 };
-  if (now - rec.first > LOGIN_LOCK_MS) {
-    rec.count = 0;
-    rec.first = now;
-    rec.lockedUntil = 0;
-  }
-  rec.count += 1;
-  if (rec.count >= LOGIN_MAX_FAILS) rec.lockedUntil = now + LOGIN_LOCK_MS;
-  loginFails.set(ip, rec);
-  // 这行日志格式与 /etc/fail2ban/filter.d/blog-admin.conf 的正则严格对应，勿随意改动
-  authLog(`failed password attempt (count=${rec.count}${rec.lockedUntil ? ", locked" : ""})`, ip);
+  recordFail(loginFails, ip, LOGIN_MAX_FAILS, LOGIN_LOCK_MS, "failed password attempt");
 }
 
 function clearLoginFails(ip) {
   loginFails.delete(ip);
 }
 
-// 定期清理过期限速记录，避免内存无限增长
+/** 通用：读取某张表的剩余锁定时间 */
+function lockRemaining(map, ip) {
+  const rec = map.get(ip);
+  if (!rec || !rec.lockedUntil) return 0;
+  const left = rec.lockedUntil - Date.now();
+  if (left <= 0) {
+    map.delete(ip);
+    return 0;
+  }
+  return left;
+}
+
+/** 通用：记录一次失败并可能锁定 */
+function recordFail(map, ip, maxFails, lockMs, label) {
+  const now = Date.now();
+  const rec = map.get(ip) || { count: 0, first: now, lockedUntil: 0 };
+  if (now - rec.first > lockMs) {
+    rec.count = 0;
+    rec.first = now;
+    rec.lockedUntil = 0;
+  }
+  rec.count += 1;
+  if (rec.count >= maxFails) rec.lockedUntil = now + lockMs;
+  map.set(ip, rec);
+  // 该日志格式与 /etc/fail2ban/filter.d/blog-admin.conf 的正则完全对应，
+  // 因此密保回答错误同样会触发 IP 封禁。
+  authLog(`${label} (count=${rec.count}${rec.lockedUntil ? ", locked" : ""})`, ip);
+  return rec;
+}
+
+  // 定期清理过期限速记录，避免内存无限增长
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, rec] of loginFails) {
-    if (now - rec.first > LOGIN_LOCK_MS && (!rec.lockedUntil || rec.lockedUntil < now)) loginFails.delete(ip);
+  for (const map of [loginFails, secFails]) {
+    for (const [ip, rec] of map) {
+      if (now - rec.first > Math.max(LOGIN_LOCK_MS, SEC_LOCK_MS) && (!rec.lockedUntil || rec.lockedUntil < now)) {
+        map.delete(ip);
+      }
+    }
   }
 }, 10 * 60 * 1000).unref();
 
@@ -345,14 +416,23 @@ function isValidIp(ip) {
 }
 
 /**
- * 调用受 sudoers 白名单限制的 fail2ban 助手脚本。
- * 该脚本只接受 list / unban <IP> / ban <IP> 三种固定形态。
+ * 调用受 sudoers 白名单限制的助手脚本，返回其 JSON 输出。
+ *
+ * @param {string[]} args  传给助手脚本的参数；
+ *                         若首个参数以 "/" 开头，则视为脚本绝对路径，
+ *                         否则默认调用 fail2ban 助手（兼容 runHelper(["list"])）。
+ * @param {string|null} stdinData  非 null 时写入子进程 stdin。
+ *                                 密码走 stdin 而非命令行，避免出现在 ps 输出里。
  */
-function runHelper(args) {
+function runHelper(args, stdinData = null) {
+  const first = String(args[0] ?? "");
+  const script = first.startsWith("/") ? first : F2B_HELPER;
+  const rest = first.startsWith("/") ? args.slice(1) : args;
+
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       "sudo",
-      ["-n", F2B_HELPER, ...args],
+      ["-n", script, ...rest],
       { timeout: 15000, maxBuffer: 1024 * 1024 },
       (err, stdout, stderr) => {
         const out = String(stdout || "").trim();
@@ -364,11 +444,15 @@ function runHelper(args) {
         try {
           parsed = JSON.parse(out);
         } catch {
-          /* 保持 parsed = null，交由调用方处理 */
+          /* parsed 保持 null，由调用方处理 */
         }
         resolve({ stdout: out, parsed, error: null });
       },
     );
+
+    if (stdinData !== null && child.stdin) {
+      child.stdin.end(String(stdinData));
+    }
   });
 }
 
@@ -459,6 +543,73 @@ async function handleApi(req, res, urlPath, query) {
 
   if (urlPath === "/api/me") {
     return json(res, 200, { authenticated: !!sid });
+  }
+
+  /* ---- 密保：获取问题（无需登录）---- */
+  if (urlPath === "/api/security/question" && req.method === "GET") {
+    const ip = clientIp(req);
+    const left = lockRemaining(secFails, ip);
+    return json(res, 200, {
+      question: securityConfig.question || "",
+      locked: left > 0,
+      lockRemainingMs: left,
+    });
+  }
+
+  /* ---- 密保：校验答案（无需登录，错 3 次锁定并触发 fail2ban）---- */
+  if (urlPath === "/api/security/verify" && req.method === "POST") {
+    const ip = clientIp(req);
+    const left = lockRemaining(secFails, ip);
+    if (left > 0) {
+      return json(res, 429, {
+        error: `回答错误次数过多，请 ${Math.ceil(left / 60000)} 分钟后再试`,
+        lockRemainingMs: left,
+      });
+    }
+    const body = JSON.parse((await readBody(req)) || "{}");
+    if (!verifyAnswer(body.answer || "")) {
+      const rec = recordFail(secFails, ip, SEC_MAX_FAILS, SEC_LOCK_MS, "failed security answer");
+      await new Promise((r) => setTimeout(r, 600));
+      const remain = SEC_MAX_FAILS - rec.count;
+      return json(res, 401, {
+        error: remain > 0 ? `答案错误，还可尝试 ${remain} 次` : "回答错误次数过多，已锁定 15 分钟",
+        remaining: Math.max(0, remain),
+      });
+    }
+    // 答案正确：发放一次性重置令牌
+    const token = crypto.randomBytes(24).toString("hex");
+    resetTokens.set(token, { created: Date.now(), ip });
+    return json(res, 200, { ok: true, token });
+  }
+
+  /* ---- 密保：重置密码（需要一次性令牌）---- */
+  if (urlPath === "/api/security/reset" && req.method === "POST") {
+    const ip = clientIp(req);
+    const body = JSON.parse((await readBody(req)) || "{}");
+    const rec = resetTokens.get(String(body.token || ""));
+    if (!rec) return json(res, 401, { error: "重置凭证无效或已过期，请重新验证密保" });
+    if (Date.now() - rec.created > RESET_TOKEN_TTL_MS) {
+      resetTokens.delete(String(body.token || ""));
+      return json(res, 401, { error: "重置凭证已过期，请重新验证密保" });
+    }
+    const newPw = String(body.newPassword || "");
+    const r = await runHelper([SETPW_HELPER], newPw);
+    if (r.error) return json(res, 500, { error: r.error });
+    if (!r.parsed || !r.parsed.ok) {
+      return json(res, 400, { error: (r.parsed && r.parsed.error) || "密码更新失败" });
+    }
+    resetTokens.delete(String(body.token));
+    secFails.delete(ip);
+    // 密码已重置：自动登录，省得再输一次
+    const token = crypto.randomBytes(32).toString("hex");
+    sessions[token] = { created: Date.now(), ip };
+    saveSessions();
+    authLog("password reset via security question", ip);
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Set-Cookie": `sid=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}`,
+    });
+    return res.end(JSON.stringify({ ok: true, message: "密码已重置，已自动登录" }));
   }
 
   /* --- 以下均需登录 --- */
